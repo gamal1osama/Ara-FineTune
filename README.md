@@ -544,6 +544,3 @@ If JSON parsing fails:
 6. Start vLLM.
 7. Run Streamlit, evaluation, or load testing.
 
-## License
-
-Add your project license here if you want to publish or share the repository.
