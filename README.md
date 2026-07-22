@@ -1,546 +1,371 @@
 # Ara-FineTune
 
-Ara-FineTune is an Arabic NLP fine-tuning pipeline focused on two structured-generation tasks:
+**Ara-FineTune** is an end-to-end Arabic Natural Language Processing (NLP) fine-tuning and inference pipeline designed to transform raw, unstructured Arabic news articles into strict, machine-readable JSON schemas for two core business tasks:
 
-1. Arabic news details extraction into a strict JSON schema.
-2. Arabic to target-language translation into a strict JSON schema.
+1. **Arabic News Details Extraction** into a strict JSON schema (`NewsDetails`).
+2. **Arabic to Target-Language News Translation** into a strict JSON schema (`Translation`).
 
-The repository covers the full workflow:
+The repository covers the full lifecycle from synthetic SFT data generation via Knowledge Distillation to Parameter-Efficient Fine-Tuning (PEFT/LoRA), high-performance vLLM serving, interactive UI testing, offline evaluation, and load testing.
 
-- synthetic SFT generation from raw news articles,
-- dataset formatting for LLaMA-Factory,
-- LoRA fine-tuning on Qwen2.5,
-- vLLM serving with LoRA adapter support,
-- Streamlit-based interactive inference,
-- offline evaluation and load testing.
+---
 
-## What This Project Does
+## 📌 Business Problem
 
-The project is built around a single fine-tuning loop:
+### 1. Unstructured Arabic Media Streams
+Modern media agencies, news aggregators, intelligence platforms, and digital publishers digest massive volumes of raw, unstructured Arabic text daily. Extracting actionable insights from this text requires multiple operations:
+- **SEO & Metadata Generation:** Formulating optimized headlines and relevant keywords.
+- **Content Categorization:** Classifying articles into standardized taxonomy (e.g., Politics, Economy, Tech, Sports).
+- **Executive Summarization:** Distilling long articles into 1–5 concise keypoints.
+- **Named Entity Recognition (NER):** Identifying key individuals, organizations, locations, quantities, and events.
+- **Cross-Lingual Distribution:** Translating news into target languages (English, French, etc.) for international syndication.
 
-1. Start from raw Arabic news articles in JSONL format.
-2. Use a cloud model through an OpenAI-compatible API to distill structured training examples.
-3. Convert those examples into LLaMA-Factory Alpaca format.
-4. Fine-tune a base model with LoRA.
-5. Serve the base model plus LoRA adapter with vLLM.
-6. Run inference from scripts, Streamlit, or load testing tools.
+Performing these operations manually or with fragmented traditional NLP pipelines is slow, expensive, inconsistent, and difficult to scale.
 
-The default base model in the repo is `Qwen/Qwen2.5-1.5B-Instruct`.
+### 2. Drawbacks of Commercial LLM APIs
+While cloud LLMs (such as GPT-4 or Claude) can handle these tasks, relying on commercial APIs for high-volume news stream processing presents significant operational challenges:
+- **High Cost at Scale:** Per-token API pricing becomes exorbitant when processing millions of articles monthly.
+- **Unpredictable Latency & Rate Limits:** Network dependency and third-party rate limits cause bottlenecks during breaking news spikes.
+- **Data Privacy & Sovereignty:** Inability to host models on-premise or in private clouds for sensitive media feeds.
+- **Vendor Lock-In:** Dependence on third-party API availability and schema changes.
 
-## Repository Layout
+### 3. Strict Schema Reliability Challenges
+Standard open-source foundation models often struggle to reliably output strictly validated JSON matching precise Pydantic schemas out-of-the-box. Un-tuned models frequently introduce markdown formatting filler, missing keys, hallucinated entity types, or invalid JSON syntax, breaking downstream API integrations and database ingestion scripts.
 
-```text
-app/
-  streamlit_app.py        # Streamlit inference UI
-configs/
-  news_finetune.yaml      # LLaMA-Factory training config
-data/
-  DataSet/                # Raw/working data directory
-scripts/
-  build_dataset.py        # Convert distilled SFT into LLaMA-Factory splits
-  evaluate_tasks.py       # Offline task evaluation
-  generate_sft.py         # Generate synthetic SFT from raw news
-  serve_vllm.sh           # Start vLLM with LoRA support
-  setup_llamafactory.sh   # Helper for LLaMA-Factory setup
-  train.py                # Launch LLaMA-Factory training
-src/
-  data/                   # Loaders, SFT builder, formatter
-  inference/              # Shared inference helpers
-  load_testing/           # Locust load test and token analyzer
-  models/                 # Base, PEFT, OpenAI, and vLLM wrappers
-  schemas/                # Pydantic schemas for structured outputs
-  tasks/                  # Prompt builders for each task
-```
+---
 
-## End-to-End Pipeline
+## 💡 The Solution
+
+**Ara-FineTune** solves these business challenges by building a domain-adapted, low-latency, self-hosted fine-tuning pipeline based on **Knowledge Distillation** and **LoRA (Low-Rank Adaptation)** applied to lightweight open-source foundation models (`Qwen/Qwen2.5-1.5B-Instruct`).
 
 ```mermaid
-flowchart LR
-  A[Raw Arabic news JSONL] --> B[SFT generation]
-  B --> C[SFT JSONL records]
-  C --> D[Alpaca formatting]
-  D --> E[LLaMA-Factory train/val JSON]
-  E --> F[LoRA fine-tuning]
-  F --> G[LoRA adapter output]
-  G --> H[vLLM server with LoRA]
-  H --> I[Streamlit / scripts / load tests]
+flowchart TD
+    subgraph Data Generation & Preparation
+        A[Raw Arabic News Articles] --> B[Teacher Distillation via OpenRouter API]
+        B --> C[Synthetic SFT JSONL Records]
+        C --> D[Alpaca Format Builder]
+        D --> E[Train/Val JSON Dataset Splits]
+    end
+
+    subgraph Fine-Tuning & Serving
+        E --> F[LLaMA-Factory SFT LoRA Training]
+        F --> G[LoRA Adapter Checkpoint]
+        G --> H[vLLM High-Performance Server]
+    end
+
+    subgraph Consumption & Benchmarking
+        H --> I[Streamlit Interactive UI]
+        H --> J[Offline Task Evaluation]
+        H --> K[Locust Load Testing]
+    end
 ```
 
-## Prerequisites
+### Key Technical Pillars
 
-You need:
+- **Teacher-Student Knowledge Distillation:** Uses a high-capacity teacher model (e.g., `gpt-oss-120b`) to generate high-quality structured training pairs from raw news articles at minimal cost.
+- **Parameter-Efficient Fine-Tuning (PEFT/LoRA):** Fine-tunes all linear projection modules (`lora_target: all`, rank `r=64`) on a 1.5B parameter base model, achieving commercial-grade schema compliance with minimal computational footprint.
+- **High-Throughput Production Serving:** Deploys the trained LoRA adapter with **vLLM** via an OpenAI-compatible completion server for low-latency inference.
+- **End-to-End Verification Suite:** Includes Streamlit UI for visual inspection, offline evaluation scripts for schema verification, and Locust load testing for benchmarking throughput under load.
 
-- Python 3.10+ recommended.
-- A CUDA-capable GPU for training and local inference.
-- Access to a base model from Hugging Face, by default `Qwen/Qwen2.5-1.5B-Instruct`.
-- `llamafactory-cli` available in your environment for training.
-- An OpenAI-compatible API key if you want to generate synthetic SFT data from a cloud model.
+---
 
-Install the Python dependencies first:
+## 🎯 Detailed Breakdown of the 2 Core Tasks
 
-```bash
-pip install -r requirements.txt
+| Feature | Task 1: Details Extraction | Task 2: Multilingual Translation |
+| :--- | :--- | :--- |
+| **Primary Goal** | Structured metadata & entity extraction | Cross-lingual structured translation |
+| **Input** | Raw Arabic news article text | Raw Arabic news article + Target language |
+| **Output Language** | Arabic (Same as input) | Target language (e.g., English, French) |
+| **Target Schema** | `NewsDetails` Pydantic Schema | `Translation` Pydantic Schema |
+| **Business Impact** | Enables auto-tagging, indexing & NER | Enables multi-language news syndication |
+
+### Task 1: Arabic News Details Extraction (`news_extraction_task`)
+Transform unstructured raw Arabic news articles into a structured JSON payload containing 5 core analytical components:
+
+1. **`story_title`**: SEO-optimized, informative headline (5 to 300 characters).
+2. **`story_keywords`**: Relevant indexing keywords/tags for search cataloging.
+3. **`story_summary`**: Bullet-point executive summary (1 to 5 concise keypoints).
+4. **`story_category`**: Standardized news categorization into one of 9 taxonomy buckets:
+   `politics`, `sports`, `art`, `technology`, `economy`, `health`, `entertainment`, `science`, `not_specified`.
+5. **`story_entities`**: Typed Named Entity Recognition (NER) mapping mentions to 13 specific entity types:
+   `person-male`, `person-female`, `location`, `organization`, `event`, `time`, `quantity`, `money`, `product`, `law`, `disease`, `artifact`, `not_specified`.
+
+#### Example Input:
+> "أعلنت وزارة الصحة المصرية اليوم عن إطلاق حملة جديدة لتطعيم الأطفال ضد مرض شلل الأطفال في جميع المحافظات..."
+
+#### Example Output (`NewsDetails` JSON):
+```json
+{
+  "story_title": "إطلاق حملة موسعة للتطعيم ضد شلل الأطفال في جميع المحافظات المصرية",
+  "story_keywords": ["وزارة الصحة", "حملة تطعيم", "شلل الأطفال", "مصر"],
+  "story_summary": [
+    "وزارة الصحة المصرية تطلق حملة طعيم جديدة ضد شلل الأطفال.",
+    "الحملة تستهدف الأطفال في جميع المحافظات المصرية."
+  ],
+  "story_category": "health",
+  "story_entities": [
+    {"entity_value": "وزارة الصحة المصرية", "entity_type": "organization"},
+    {"entity_value": "شلل الأطفال", "entity_type": "disease"},
+    {"entity_value": "مصر", "entity_type": "location"}
+  ]
+}
 ```
 
-The repository also expects LLaMA-Factory to be installed separately so that the `llamafactory-cli` command exists in your shell.
+---
 
-## Environment Variables
+### Task 2: Multilingual News Translation (`translation_task`)
+Translates Arabic news stories into target languages (e.g., English, French) while restructuring the response directly into a clean JSON structure containing both headline and body content.
 
-The scripts and UI read configuration from `.env` when available.
+1. **`translated_title`**: High-quality translated title tailored for target audience readability.
+2. **`translated_content`**: Complete, accurate translation of the news article content.
 
-Recommended variables:
+#### Example Output (`Translation` JSON - Target: English):
+```json
+{
+  "translated_title": "Egyptian Ministry of Health Launches Nationwide Polio Vaccination Campaign",
+  "translated_content": "The Egyptian Ministry of Health announced today the launch of a new campaign to vaccinate children against polio across all governorates..."
+}
+```
+
+---
+
+## 🛠️ Repository Layout
+
+```text
+Ara-FineTune/
+├── app/
+│   └── streamlit_app.py        # Interactive Streamlit web interface
+├── configs/
+│   └── news_finetune.yaml      # LLaMA-Factory training configuration template
+├── data/
+│   └── DataSet/                # Raw input data directory
+├── scripts/
+│   ├── generate_sft.py         # Step 1: Generate synthetic SFT data via distillation
+│   ├── build_dataset.py        # Step 2: Format SFT JSONL into LLaMA-Factory splits
+│   ├── setup_llamafactory.sh   # Step 3a: Helper script to install & configure LLaMA-Factory
+│   ├── train.py                # Step 3b: Launch LLaMA-Factory LoRA fine-tuning
+│   ├── serve_vllm.sh           # Step 4: Start high-throughput vLLM OpenAI server
+│   └── evaluate_tasks.py       # Step 6: Offline benchmarking across model backends
+├── src/
+│   ├── data/                   # SFT data loaders, builders, and formatters
+│   ├── inference/              # Robust JSON parsing and text cleanup utilities
+│   ├── load_testing/           # Locust load testing script and token analyzer
+│   ├── models/                 # Base HF, PEFT, OpenAI API, and vLLM wrapper classes
+│   ├── schemas/                # Pydantic schema definitions (NewsDetails & Translation)
+│   └── tasks/                  # Prompt builders for extraction and translation tasks
+├── .env.example                # Template for environment configuration
+└── requirements.txt            # Python dependencies
+```
+
+---
+
+## 🚀 Step-by-Step Execution Guide
+
+### Prerequisites
+- **Python:** 3.10+
+- **GPU:** NVIDIA GPU with CUDA support (Minimum 16GB VRAM recommended for training/vLLM serving).
+- **Dependencies:** Install requirements:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+---
+
+### Environment Setup
+
+Copy `.env.example` to `.env` and set your paths and keys:
 
 ```bash
-# Base model and LoRA serving
+cp .env.example .env
+```
+
+Key environment configuration variables:
+
+```env
+# Models & Paths
 BASE_MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct
-# LORA_PATH is the shared adapter/checkpoint directory for training and vLLM loading.
-LORA_PATH=/gdrive/MyDrive/ara-finetune/models
+LORA_PATH=/path/to/save/models/news-lora
 LORA_MODULE_NAME=news-lora
+
+# vLLM Server Settings
 VLLM_ENDPOINT=http://localhost:8000
 VLLM_MODEL_ID=news-lora
-
-# SFT generation
-OPENAI_API_KEY=your_key
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-CLOUD_MODEL_ID=openai/gpt-oss-120b:free
-RAW_DATA_PATH=/gdrive/MyDrive/ara-finetune/datasets/news-sample.jsonl
-SFT_SAVE_PATH=/gdrive/MyDrive/ara-finetune/datasets/sft.jsonl
-
-# Dataset formatting
-LLAMAFACTORY_DATA_DIR=/gdrive/MyDrive/ara-finetune/datasets/llamafactory-finetune-data
-TRAIN_SIZE=2700
-
-# vLLM serving
 VLLM_PORT=8000
 GPU_MEMORY_UTILIZATION=0.90
 MAX_MODEL_LEN=3000
+
+# SFT Data Generation (OpenAI / OpenRouter API)
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+CLOUD_MODEL_ID=openai/gpt-oss-120b:free
+RAW_DATA_PATH=data/DataSet/raw_news.jsonl
+SFT_SAVE_PATH=data/DataSet/sft.jsonl
+
+# LLaMA-Factory Dataset Paths
+LLAMAFACTORY_DATA_DIR=data/llamafactory-finetune-data
+TRAIN_SIZE=2700
 ```
 
-If you do not set these values, the scripts fall back to the defaults embedded in the code. Some of those defaults still point to `/gdrive/...`, so in a local environment you usually want to override them.
+---
 
-## Raw Data Format
+### Step 1: Synthetic SFT Generation (Knowledge Distillation)
 
-The synthetic data generation script expects JSONL input where each line is a news record containing at least a `content` field.
-
-Example:
-
-```json
-{"content":"...Arabic news article text..."}
-```
-
-## Step 1: Generate Synthetic SFT Data
-
-This repository uses a cloud model to create structured supervision for two tasks:
-
-- details extraction,
-- translation.
-
-Run:
+Generate structured fine-tuning examples from raw Arabic news articles using a high-capacity teacher LLM:
 
 ```bash
 python scripts/generate_sft.py
 ```
 
-What the script does:
+- Reads raw JSONL records (`RAW_DATA_PATH`).
+- Constructs task-specific messages using `src/tasks/`.
+- Calls teacher API via `OpenAIModel` with `temperature=0.2`.
+- Validates and parses response against Pydantic schemas.
+- Saves structured intermediate dataset to `SFT_SAVE_PATH`.
 
-1. Loads `OPENAI_API_KEY` and optional `OPENAI_BASE_URL`.
-2. Reads raw news from `RAW_DATA_PATH`.
-3. Builds task-specific prompts using the prompt builders in `src/tasks/`.
-4. Calls the cloud model through `src/models/openai_model.py`.
-5. Repairs and parses the JSON response with `src/inference/utils.py`.
-6. Appends structured records to `SFT_SAVE_PATH`.
+---
 
-The generated intermediate record format contains:
+### Step 2: Build LLaMA-Factory Dataset
 
-- `id`
-- `story`
-- `task`
-- `output_scheme`
-- `response`
-
-## Step 2: Format Data for LLaMA-Factory
-
-Convert the generated SFT JSONL into Alpaca-style JSON files for LLaMA-Factory:
+Convert intermediate SFT JSONL records into Alpaca-formatted `train.json` and `val.json` splits:
 
 ```bash
 python scripts/build_dataset.py
 ```
 
-What the formatter produces:
+Output directory structure in `LLAMAFACTORY_DATA_DIR`:
+- `train.json` (Training set split)
+- `val.json` (Validation set split)
 
-- `train.json`
-- `val.json`
+---
 
-These files are written into `LLAMAFACTORY_DATA_DIR`.
+### Step 3: Train LoRA Adapter with LLaMA-Factory
 
-Each sample is converted to a structure with:
+1. Setup LLaMA-Factory repository and inject custom dataset configurations:
+   ```bash
+   ./scripts/setup_llamafactory.sh
+   ```
 
-- `system`
-- `instruction`
-- `input`
-- `output`
-- `history`
+2. Launch training:
+   ```bash
+   python scripts/train.py
+   ```
+   Or execute directly using `llamafactory-cli`:
+   ```bash
+   cd LLaMA-Factory && llamafactory-cli train examples/train_lora/news_finetune.yaml
+   ```
 
-The formatter injects a fixed system prompt that tells the model to follow the task and output scheme and to return JSON only.
+#### Training Parameters Overview (`configs/news_finetune.yaml`):
+- **Stage:** Supervised Fine-Tuning (`sft`)
+- **Finetuning Type:** LoRA (`rank=64`, `lora_target=all`)
+- **Base Model:** `Qwen/Qwen2.5-1.5B-Instruct`
+- **Precision:** `bf16`
+- **Batch Size:** 1 per device, 4 gradient accumulation steps
+- **Learning Rate:** `1.0e-4` with cosine scheduler & 10% warmup
+- **Epochs:** 3.0
 
-## Step 3: Train with LLaMA-Factory
+---
 
-Use [scripts/setup_llamafactory.sh](scripts/setup_llamafactory.sh) to prepare LLaMA-Factory.
+### Step 4: High-Throughput Serving via vLLM
 
-Run it from the repository root:
-
-```bash
-./scripts/setup_llamafactory.sh
-```
-
-That setup script does the setup work you need before training:
-
-1. Clones LLaMA-Factory from source.
-2. Installs it in editable mode with `pip install -e .`.
-3. Reads your `.env` values.
-4. Injects `news_finetune_train` and `news_finetune_val` into `LLaMA-Factory/data/dataset_info.json` using your dataset paths.
-5. Generates `LLaMA-Factory/examples/train_lora/news_finetune.yaml` from your environment values.
-
-The checked-in [configs/news_finetune.yaml](configs/news_finetune.yaml) is a safe template, not the final runnable config.
-Use the generated YAML under `LLaMA-Factory/examples/train_lora/news_finetune.yaml` when you actually train.
-
-The dataset registration it adds looks like this:
-
-```json
-"news_finetune_train": {
-  "file_name": "/gdrive/MyDrive/ara-finetune/datasets/llamafactory-finetune-data/train.json",
-  "columns": {
-    "prompt": "instruction",
-    "query": "input",
-    "response": "output",
-    "system": "system",
-    "history": "history"
-  }
-},
-"news_finetune_val": {
-  "file_name": "/gdrive/MyDrive/ara-finetune/datasets/llamafactory-finetune-data/val.json",
-  "columns": {
-    "prompt": "instruction",
-    "query": "input",
-    "response": "output",
-    "system": "system",
-    "history": "history"
-  }
-}
-```
-
-Training is then launched through:
-
-```bash
-cd LLaMA-Factory && llamafactory-cli train /content/LLaMA-Factory/examples/train_lora/news_finetune.yaml
-```
-
-You can still use the repository wrapper if you prefer:
-
-```bash
-python scripts/train.py configs/news_finetune.yaml
-```
-
-When no path is passed, the wrapper prefers the generated LLaMA-Factory config under `LLaMA-Factory/examples/train_lora/news_finetune.yaml` and falls back to [configs/news_finetune.yaml](configs/news_finetune.yaml) if needed.
-
-The underlying command is:
-
-```bash
-llamafactory-cli train configs/news_finetune.yaml
-```
-
-### LLaMA-Factory Config Explained
-
-The main training config is [configs/news_finetune.yaml](configs/news_finetune.yaml).
-
-Important sections:
-
-#### Model
-
-```yaml
-model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
-trust_remote_code: true
-```
-
-This selects the base model and allows custom model code if needed.
-
-#### Method
-
-```yaml
-stage: sft
-do_train: true
-finetuning_type: lora
-lora_rank: 64
-lora_target: all
-```
-
-This means the project performs supervised fine-tuning with LoRA adapters applied across all supported modules.
-
-#### Dataset
-
-```yaml
-dataset: news_finetune_train
-eval_dataset: news_finetune_val
-template: qwen
-cutoff_len: 3500
-overwrite_cache: true
-preprocessing_num_workers: 16
-```
-
-This tells LLaMA-Factory which named datasets to load and which chat template to use.
-
-The dataset names must match how you register or prepare the JSON files inside your LLaMA-Factory data directory.
-
-#### Output
-
-```yaml
-output_dir: /gdrive/MyDrive/ara-finetune/models/
-logging_steps: 10
-save_steps: 500
-plot_loss: true
-```
-
-This is where checkpoints and adapter artifacts are written.
-
-#### Train
-
-```yaml
-per_device_train_batch_size: 1
-gradient_accumulation_steps: 4
-learning_rate: 1.0e-4
-num_train_epochs: 3.0
-lr_scheduler_type: cosine
-warmup_ratio: 0.1
-bf16: true
-```
-
-These values define the optimization strategy used in fine-tuning.
-
-#### Eval
-
-```yaml
-per_device_eval_batch_size: 1
-eval_strategy: steps
-eval_steps: 100
-```
-
-#### Hub / Logging
-
-```yaml
-report_to: wandb
-run_name: newsx-finetune-llamafactory
-push_to_hub: true
-hub_model_id: "Gamal1/news-analyzer"
-hub_private_repo: true
-hub_strategy: checkpoint
-```
-
-These settings enable experiment tracking and optional model pushing.
-
-### What You Need Before Training
-
-Before running the training script, make sure:
-
-- `scripts/setup_llamafactory.sh` has been run successfully.
-- `.env` contains the dataset paths, model path, output directory, and hub IDs you want to use.
-- `llamafactory-cli` is available.
-- The dataset JSON files are in the expected LLaMA-Factory data location.
-- The output directory is writable.
-- Your GPU has enough memory for the chosen base model and sequence length.
-
-### Practical Training Sequence
-
-1. Prepare raw news JSONL.
-2. Generate SFT records with `scripts/generate_sft.py`.
-3. Build LLaMA-Factory train/val files with `scripts/build_dataset.py`.
-4. Update [configs/news_finetune.yaml](configs/news_finetune.yaml) if you want to change the base model, LoRA rank, or output directory.
-5. Run `python scripts/train.py`.
-6. Collect the LoRA adapter from `output_dir`.
-
-## Step 4: Serve the Fine-Tuned Model with vLLM
-
-Start the server with:
+Serve the base model together with the trained LoRA adapter:
 
 ```bash
 bash scripts/serve_vllm.sh
 ```
 
-The server script does the following:
+This starts an OpenAI-compatible completion server on port `8000` exposing `/v1/completions` with dynamic adapter loading enabled.
 
-1. Loads environment variables from `.env` if present.
-2. Uses `BASE_MODEL_ID`, `LORA_PATH`, `LORA_MODULE_NAME`, `VLLM_PORT`, `GPU_MEMORY_UTILIZATION`, and `MAX_MODEL_LEN`.
-3. Starts `vllm.entrypoints.openai.api_server` in the background.
-4. Exposes an OpenAI-compatible completions endpoint at `/v1/completions`.
+---
 
-Default behavior in the script:
+### Step 5: Run Streamlit Web Application
 
-- base model: `Qwen/Qwen2.5-1.5B-Instruct`
-- served model name: `qwen-base`
-- LoRA module name: `news-lora`
-- port: `8000`
-- max model length: `3000`
-- LoRA rank limit: `64`
-
-The script also writes logs to `logs/vllm.log`.
-
-### vLLM Inference Flow
-
-The vLLM client in `src/models/vllm_model.py` works like this:
-
-1. Load the tokenizer for the base model.
-2. Convert chat messages into a prompt with the chat template.
-3. Send the prompt to the vLLM completions endpoint.
-4. Attach LoRA module metadata when `lora_name` and `lora_path` are set.
-5. Read the generated text from the response.
-
-This means the server can stay generic while the adapter is selected at request time.
-
-## Step 5: Run Interactive Inference
-
-The main UI is [app/streamlit_app.py](app/streamlit_app.py).
-
-Run it with:
+Launch the interactive web user interface:
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-The app provides:
+Features:
+- Dual-mode tabs: **Details Extraction** and **Multilingual Translation**.
+- Real-time latency (ms) & generation speed (tokens/sec) monitoring.
+- Interactive JSON schema tree viewer and raw text display.
+- Session request history tracking.
 
-- a details extraction tab,
-- a translation tab,
-- request history,
-- architecture notes,
-- live token and latency metrics.
+---
 
-### Streamlit Runtime Requirements
+### Step 6: Offline Task Evaluation
 
-The UI expects:
-
-- a running vLLM server,
-- a valid `BASE_MODEL_ID`,
-- the correct `LORA_PATH` and `LORA_MODULE_NAME`,
-- the vLLM endpoint URL in `VLLM_ENDPOINT`.
-
-### UI Inference Behavior
-
-For each request, the app:
-
-1. Builds task-specific messages with the prompt builders in `src/tasks/`.
-2. Applies the tokenizer chat template from the base model.
-3. Sends the prompt to vLLM.
-4. Measures latency.
-5. Attempts to parse the returned text as JSON.
-6. Displays the raw or parsed output.
-
-## Step 6: Offline Evaluation
-
-Run the evaluation script with one of the supported backends:
+Evaluate and compare model performance across backends:
 
 ```bash
+# Evaluate vLLM server with LoRA adapter
 python scripts/evaluate_tasks.py --model-type vllm
+
+# Evaluate base model without fine-tuning
 python scripts/evaluate_tasks.py --model-type base
+
+# Evaluate local PEFT model directly
 python scripts/evaluate_tasks.py --model-type finetuned
-python scripts/evaluate_tasks.py --model-type openai
 ```
 
-Supported model types:
+---
 
-- `base`: local Hugging Face model without LoRA
-- `finetuned`: local Hugging Face model with a loaded adapter
-- `openai`: OpenAI-compatible API client
-- `vllm`: local vLLM completions server with LoRA
+### Step 7: Production Load Testing & Performance Profiling
 
-The script evaluates both tasks using the same prompt builders as the UI.
-
-## Step 7: Load Testing
-
-The load-testing entrypoint is [src/load_testing/locustfile.py](src/load_testing/locustfile.py).
-
-Run:
+Run Locust load tests to benchmark vLLM performance under concurrent traffic:
 
 ```bash
-locust -f src/load_testing/locustfile.py
+locust -f src/load_testing/locustfile.py --host http://localhost:8000
 ```
 
-This will:
-
-- generate Arabic prompts with Faker,
-- POST them to `/v1/completions`,
-- optionally attach LoRA metadata,
-- store responses in a JSONL token log for later analysis.
-
-Analyze token usage with:
+Analyze token throughput and latency distribution from token logs:
 
 ```bash
 python src/load_testing/token_analyzer.py ./vllm_tokens.txt Qwen/Qwen2.5-1.5B-Instruct
 ```
 
-## Task Schemas
+---
 
-### Details Extraction
+## 📊 Summary of Data Schemas
 
-The extraction task produces a strict JSON object with:
+### Details Extraction Schema (`src/schemas/news_schema.py`)
 
-- `story_title`
-- `story_keywords`
-- `story_summary`
-- `story_category`
-- `story_entities`
+```python
+class Entity(BaseModel):
+    entity_value: str
+    entity_type: EntityType  # 13 categories
 
-The entity structure includes:
+class NewsDetails(BaseModel):
+    story_title: str         # 5 to 300 characters
+    story_keywords: List[str]
+    story_summary: List[str]  # 1 to 5 keypoints
+    story_category: StoryCategory  # 9 categories
+    story_entities: List[Entity]  # 1 to 10 entities
+```
 
-- `entity_value`
-- `entity_type`
+### Translation Schema (`src/schemas/translation_schema.py`)
 
-### Translation
+```python
+class Translation(BaseModel):
+    translated_title: str    # Translated headline
+    translated_content: str  # Full translated story
+```
 
-The translation task produces:
+---
 
-- `translated_title`
-- `translated_content`
+## ❓ Troubleshooting
 
-## Common Files and Their Roles
+| Issue | Cause | Solution |
+| :--- | :--- | :--- |
+| `llamafactory-cli not found` | LLaMA-Factory is not installed in the environment | Run `./scripts/setup_llamafactory.sh` or `pip install -e LLaMA-Factory` |
+| `vLLM Connection Error` | vLLM server is not running or port mismatch | Start vLLM with `bash scripts/serve_vllm.sh` and verify `VLLM_ENDPOINT` in `.env` |
+| `Invalid JSON Output` | Model max tokens too small or sequence truncated | Increase `MAX_MODEL_LEN` in `.env` or check prompt truncation |
+| `CUDA Out of Memory` | Batch size or sequence length too high for GPU | Reduce `per_device_train_batch_size` or set `GPU_MEMORY_UTILIZATION` lower |
 
-- [scripts/generate_sft.py](scripts/generate_sft.py): distill supervised examples from raw stories.
-- [scripts/build_dataset.py](scripts/build_dataset.py): convert the distilled JSONL into train/val files.
-- [configs/news_finetune.yaml](configs/news_finetune.yaml): LLaMA-Factory fine-tuning config.
-- [scripts/train.py](scripts/train.py): launch the training job.
-- [scripts/serve_vllm.sh](scripts/serve_vllm.sh): start the vLLM server with LoRA.
-- [app/streamlit_app.py](app/streamlit_app.py): interactive inference UI.
-- [src/models/model_factory.py](src/models/model_factory.py): create the correct backend wrapper.
+---
 
-## Troubleshooting
+## 📜 License & Acknowledgments
 
-If training does not start:
-
-- verify `llamafactory-cli` is installed and on `PATH`.
-- check that `configs/news_finetune.yaml` points to the correct dataset names and model path.
-- confirm the output directory exists or can be created.
-
-If vLLM does not serve requests:
-
-- confirm the server is running and `logs/vllm.log` is not showing a startup failure.
-- make sure `VLLM_ENDPOINT` matches the server port.
-- verify the LoRA adapter path is correct.
-
-If the Streamlit app cannot connect:
-
-- start vLLM first.
-- check `VLLM_ENDPOINT`, `VLLM_MODEL_ID`, `LORA_PATH`, and `LORA_MODULE_NAME`.
-
-If JSON parsing fails:
-
-- inspect the model output for incomplete JSON.
-- ensure the response is not truncated by `max_tokens` or `MAX_MODEL_LEN` limits.
-
-## Suggested Run Order
-
-1. Install dependencies.
-2. Set `.env` values.
-3. Generate SFT records.
-4. Build the LLaMA-Factory dataset.
-5. Train the LoRA adapter.
-6. Start vLLM.
-7. Run Streamlit, evaluation, or load testing.
+- **Base Model:** [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) by Qwen Team / Alibaba Cloud.
+- **Fine-Tuning Framework:** [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory).
+- **Serving Engine:** [vLLM](https://github.com/vllm-project/vllm).
 
