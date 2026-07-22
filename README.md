@@ -9,7 +9,7 @@ The repository covers the full lifecycle from synthetic SFT data generation via 
 
 ---
 
-## 📌 Business Problem
+## Business Problem
 
 ### 1. Unstructured Arabic Media Streams
 Modern media agencies, news aggregators, intelligence platforms, and digital publishers digest massive volumes of raw, unstructured Arabic text daily. Extracting actionable insights from this text requires multiple operations:
@@ -33,7 +33,7 @@ Standard open-source foundation models often struggle to reliably output strictl
 
 ---
 
-## 💡 The Solution
+## The Solution
 
 **Ara-FineTune** solves these business challenges by building a domain-adapted, low-latency, self-hosted fine-tuning pipeline based on **Knowledge Distillation** and **LoRA (Low-Rank Adaptation)** applied to lightweight open-source foundation models (`Qwen/Qwen2.5-1.5B-Instruct`).
 
@@ -68,7 +68,7 @@ flowchart TD
 
 ---
 
-## 🎯 Detailed Breakdown of the 2 Core Tasks
+## Detailed Breakdown of the 2 Core Tasks
 
 | Feature | Task 1: Details Extraction | Task 2: Multilingual Translation |
 | :--- | :--- | :--- |
@@ -128,7 +128,7 @@ Translates Arabic news stories into target languages (e.g., English, French) whi
 
 ---
 
-## 🛠️ Repository Layout
+## Repository Layout
 
 ```text
 Ara-FineTune/
@@ -158,7 +158,7 @@ Ara-FineTune/
 
 ---
 
-## 🚀 Step-by-Step Execution Guide
+## Step-by-Step Execution Guide
 
 ### Prerequisites
 - **Python:** 3.10+
@@ -325,7 +325,7 @@ python src/load_testing/token_analyzer.py ./vllm_tokens.txt Qwen/Qwen2.5-1.5B-In
 
 ---
 
-## 📊 Summary of Data Schemas
+## Summary of Data Schemas
 
 ### Details Extraction Schema (`src/schemas/news_schema.py`)
 
@@ -352,7 +352,7 @@ class Translation(BaseModel):
 
 ---
 
-## ❓ Troubleshooting
+## Troubleshooting
 
 | Issue | Cause | Solution |
 | :--- | :--- | :--- |
@@ -363,7 +363,7 @@ class Translation(BaseModel):
 
 ---
 
-## 📜 License & Acknowledgments
+## License & Acknowledgments
 
 - **Base Model:** [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) by Qwen Team / Alibaba Cloud.
 - **Fine-Tuning Framework:** [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory).
